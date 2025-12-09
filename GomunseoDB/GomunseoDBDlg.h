@@ -3,6 +3,24 @@
 
 #pragma once
 
+// ===========================================================
+// [VTK 시작] 필수 헤더 파일 포함
+// ===========================================================
+// VTK 초기화 매크로 (이게 없으면 화면이 검게 나오거나 에러가 납니다)
+
+// VTK 핵심 클래스 헤더
+#include <vtkSmartPointer.h> // 똑똑한 포인터 (메모리 자동 관리)
+#include <vtkRenderWindow.h> // MFC 윈도우와 연결될 VTK 렌더링 창
+#include <vtkRenderer.h> // 무대 감독 (빛, 카메라, 배우 관리)
+#include <vtkRenderWindowInteractor.h> // 마우스/키보드 이벤트 처리기
+#include <vtkSTLReader.h> // STL 파일 읽기 도구
+#include <vtkPolyDataMapper.h> // 데이터를 그래픽으로 변환하는 도구
+#include <vtkActor.h> // 실제 화면에 보이는 배우(모델)
+#include <vtkCamera.h> // 카메라
+
+// ===========================================================
+// [VTK 끝]
+// ===========================================================
 #include <vector>
 #include <set> // 통계 계산용 (중복 제거)
 using namespace std;
@@ -92,7 +110,20 @@ class CGomunseoDBDlg : public CDialogEx
 	// 생성입니다.
 public:
 	CGomunseoDBDlg(CWnd* pParent = nullptr);	// 표준 생성자입니다.
+	// ===========================================================
+	// [VTK 추가] 멤버 변수 선언 (SmartPointer 사용)
+	// ===========================================================
+	// 1. 렌더링 창 (MFC Picture Control과 연결됨)
+	vtkSmartPointer<vtkRenderWindow> m_vtkWindow;
+	// 2. 렌더러 (무대)
+	vtkSmartPointer<vtkRenderer> m_vtkRenderer;
+	// 3. 인터랙터 (마우스 조작)
+	vtkSmartPointer<vtkRenderWindowInteractor> m_vtkInteractor;
+	// 4. 현재 화면에 떠 있는 STL 모델의 배우(Actor)
+	vtkSmartPointer<vtkActor> m_vtkActor;
 
+	// [VTK 추가] STL 파일을 불러오는 도우미 함수 선언
+	void LoadSTLFile(CString strPath);
 	// 대화 상자 데이터입니다.
 #ifdef AFX_DESIGN_TIME
 	enum { IDD = IDD_GOMUNSEODB_DIALOG };

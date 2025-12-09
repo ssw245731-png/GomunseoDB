@@ -6,7 +6,10 @@
 #include "GomunseoDB.h"
 #include "GomunseoDBDlg.h"
 #include "afxdialogex.h"
-
+#include <vtkAutoInit.h>
+VTK_MODULE_INIT(vtkRenderingOpenGL2);
+VTK_MODULE_INIT(vtkInteractionStyle);
+VTK_MODULE_INIT(vtkRenderingFreeType);
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
@@ -117,7 +120,38 @@ BOOL CGomunseoDBDlg::OnInitDialog()
 		pList->InsertColumn(2, _T("번"), LVCFMT_LEFT, 50);
 		pList->InsertColumn(3, _T("유니코드"), LVCFMT_LEFT, 100);
 	}
+	// ===========================================================
+	// [VTK 시작] 초기화 및 Picture Control 연결
+	// ===========================================================
 
+	// 1. 아까 만든 Picture Control(액자)을 찾습니다.
+	CWnd* pPic = GetDlgItem(IDC_PIC_VTK);
+	if (pPic)
+	{
+		// 2. VTK 핵심 부품 생성 (New() 사용)
+		m_vtkWindow = vtkSmartPointer<vtkRenderWindow>::New();
+		m_vtkRenderer = vtkSmartPointer<vtkRenderer>::New();
+		m_vtkInteractor = vtkSmartPointer<vtkRenderWindowInteractor>::New();
+
+		// 3. 부품 조립 및 MFC 연결 (가장 중요한 부분!)
+		// VTK 창에게 "너의 부모 윈도우는 저 Picture Control이야" 라고 알려줌
+		m_vtkWindow->SetParentId(pPic->GetSafeHwnd());
+
+		// 렌더링 창에 무대(Renderer) 추가
+		m_vtkWindow->AddRenderer(m_vtkRenderer);
+
+		// 인터랙터에 렌더링 창 연결
+		m_vtkInteractor->SetRenderWindow(m_vtkWindow);
+
+		// 4. 초기 설정
+		// 배경색 설정 (R, G, B: 0.0~1.0 사이 값. 예: 옅은 회색)
+		m_vtkRenderer->SetBackground(0.9, 0.9, 0.9);
+
+		// 일단 한번 그려서 초기화 (아직 모델은 없음)
+	}
+	// ===========================================================
+	// [VTK 끝]
+	// ===========================================================
 	return TRUE;
 }
 
@@ -343,7 +377,40 @@ void CGomunseoDBDlg::OnLButtonDown(UINT nFlags, CPoint point)
 
 			// 4. 구성 글자 리스트 갱신
 			UpdateComponentList();
+			// ==========================================
+						// 5. STL 3D 모델 로드 (파일명 직접 찾기 수정판)
+						// ==========================================
+			CString strSTLPath;
 
+			// [수정] 폴더를 찾는 게 아니라, 파일명을 직접 만듭니다.
+			// 형식: 루트\04_3d\글자코드_타입.stl
+			strSTLPath.Format(_T("%s\\04_3d\\%s_%d.stl"),
+				(LPCTSTR)m_strRootPath, (LPCTSTR)data.m_char, data.m_type);
+
+			CFileFind finderSTL;
+			BOOL bFound = finderSTL.FindFile(strSTLPath); // 파일이 있는지 확인
+
+			if (bFound) {
+				// 파일을 찾았으면 바로 로드!
+				// [확인용] 성공하면 주석 해제해서 확인해보세요
+				// AfxMessageBox(_T("찾았다! ") + strSTLPath);
+
+				LoadSTLFile(strSTLPath);
+			}
+			else {
+				// [디버깅] 도대체 어디를 찾고 있는지 확인하는 팝업
+				// 파일이 없으면 이 팝업이 뜰 겁니다. 경로를 확인해보세요.
+				// CString msg;
+				// msg.Format(_T("파일이 없습니다:\n%s"), (LPCTSTR)strSTLPath);
+				// AfxMessageBox(msg);
+
+				// 기존 모델 지우기
+				if (m_vtkRenderer && m_vtkActor) {
+					m_vtkRenderer->RemoveActor(m_vtkActor);
+					m_vtkActor = nullptr;
+					m_vtkWindow->Render();
+				}
+			}
 			break;
 		}
 	}
@@ -662,4 +729,66 @@ void CGomunseoDBDlg::OnBnClickedBtnOpenFolder()
 		EndWaitCursor();
 		AfxMessageBox(_T("폴더 내에 typeDB.csv 파일이 없습니다."));
 	}
+}
+
+// GomunseoDBDlg.cpp 맨 아래쪽에 함수 추가
+
+// ===========================================================
+// [VTK 함수] STL 파일 경로를 받아서 뷰어에 띄우는 함수
+// ===========================================================
+void CGomunseoDBDlg::LoadSTLFile(CString strPath)
+{
+	if (!m_vtkRenderer) return;
+
+	// 0. 인터랙터 초기화 (안전장치)
+	if (m_vtkInteractor && !m_vtkInteractor->GetInitialized()) {
+		m_vtkInteractor->Initialize();
+	}
+
+	// 1. 기존 모델 삭제
+	if (m_vtkActor) {
+		m_vtkRenderer->RemoveActor(m_vtkActor);
+		m_vtkActor = nullptr;
+	}
+
+	// 2. 파일 읽기 시도
+	vtkSmartPointer<vtkSTLReader> reader = vtkSmartPointer<vtkSTLReader>::New();
+
+	// ★ [핵심] 한글 경로 처리를 위한 강력한 변환 (UTF-8)
+	// VTK 최신 버전은 파일 경로를 UTF-8로 원할 때가 많습니다.
+	CT2A asciiPath(strPath, CP_UTF8);
+	reader->SetFileName(asciiPath);
+	reader->Update();
+
+	// 3. ★ 탐지기: 점(Point)의 개수 확인
+	int nPoints = reader->GetOutput()->GetNumberOfPoints();
+
+	if (nPoints == 0) {
+		// 읽기 실패! (한글 경로 문제일 가능성 99%)
+		// 백업 방법: CP_ACP (시스템 기본 코덱)으로 재시도
+		CT2A ansiPath(strPath, CP_ACP);
+		reader->SetFileName(ansiPath);
+		reader->Update();
+		nPoints = reader->GetOutput()->GetNumberOfPoints();
+
+		if (nPoints == 0) {
+			CString msg;
+			msg.Format(_T("파일을 찾았지만 VTK가 읽지 못했습니다.\n경로: %s"), (LPCTSTR)strPath);
+			AfxMessageBox(msg);
+			return;
+		}
+	}
+
+	// 4. 매퍼 연결
+	vtkSmartPointer<vtkPolyDataMapper> mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+	mapper->SetInputConnection(reader->GetOutputPort());
+
+	// 5. 액터 생성
+	m_vtkActor = vtkSmartPointer<vtkActor>::New();
+	m_vtkActor->SetMapper(mapper);
+
+	// 6. 렌더링
+	m_vtkRenderer->AddActor(m_vtkActor);
+	m_vtkRenderer->ResetCamera(); // 카메라 정렬
+	m_vtkWindow->Render();
 }
